@@ -76,3 +76,30 @@ http://localhost:8000/docs
 This lets you test every endpoint directly from the browser.
 
 ![Swagger UI](swagger-screenshot.png)
+
+## Extras (Optional)
+
+These endpoints go beyond the core CRUD requirement:
+
+| Method | Endpoint                          | Purpose                                    |
+|--------|------------------------------------|---------------------------------------------|
+| GET    | /tasks/filter?done=true            | Filter tasks by completion status          |
+| GET    | /tasks/filter?search=milk          | Search tasks by title (case-insensitive)   |
+| GET    | /stats                             | Get total, done, and open task counts      |
+| POST   | /reset                             | Restore the 3 example tasks                |
+| GET    | /tasks/page?limit=2&offset=1       | Return a paginated slice of tasks          |
+
+Example:
+
+```
+curl -i http://localhost:8000/stats
+```
+
+```
+HTTP/1.1 200 OK
+{"total":3,"done":0,"open":3}
+```
+
+## The Mortality Experiment
+
+I created a new task with POST, confirmed it existed with GET /tasks, then restarted the server. After restart, the new task was gone - only the original 3 seed tasks remained. This happens because the task list is a plain Python variable held in the server's memory, not saved to disk anywhere, so restarting the process wipes it clean. This is exactly why real applications use a database instead of in-memory storage.
