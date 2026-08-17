@@ -12,15 +12,19 @@ A simple CRUD (Create, Read, Update, Delete) REST API for managing a to-do task 
 
 Clone the repository and install dependencies:
 
+```
 git clone https://github.com/MuhmmadBilalKhan/task-api.git
 cd task-api
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+```
 
 ## How to Run
 
+```
 uvicorn main:app --reload
+```
 
 The server will start at http://localhost:8000
 
@@ -50,18 +54,24 @@ The server will start at http://localhost:8000
 
 Example using curl - creating a task:
 
+```
 curl -i -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\": \"Buy milk\"}"
+```
 
 Expected response:
 
+```
 HTTP/1.1 201 Created
 {"id":4,"title":"Buy milk","done":false}
+```
 
 ## Swagger UI
 
 Interactive API documentation is available at:
 
+```
 http://localhost:8000/docs
+```
 
 This lets you test every endpoint directly from the browser.
 
