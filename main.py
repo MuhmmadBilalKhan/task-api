@@ -52,6 +52,9 @@ def init_db():
 init_db()
 
 
+# NOTE: this old in-memory list is no longer used by GET /tasks or GET /tasks/{id}
+# (those now read from tasks.db). It's still used by POST/PUT/DELETE/filter/page/stats/reset
+# for now - those will be migrated to SQL in later stages.
 tasks = [
     {"id": 1, "title": "Learn FastAPI", "done": False},
     {"id": 2, "title": "Build Task API", "done": False},
@@ -75,7 +78,20 @@ def health_check():
 
 @app.get("/tasks")
 def get_tasks():
-    return tasks
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks")
+    rows = cursor.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        result.append({
+            "id": row[0],
+            "title": row[1],
+            "done": bool(row[2])
+        })
+    return result
 
 
 # NOTE: these two must come BEFORE /tasks/{task_id},
@@ -104,14 +120,16 @@ def paginate_tasks(limit: int = 10, offset: int = 0):
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
 
-    raise HTTPException(
-        status_code=404,
-        detail=f"Task {task_id} not found"
-    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    return {"id": row[0], "title": row[1], "done": bool(row[2])}
 
 
 @app.post("/tasks", status_code=201)
