@@ -52,9 +52,9 @@ def init_db():
 init_db()
 
 
-# NOTE: this old in-memory list is no longer used by GET /tasks or GET /tasks/{id}
-# (those now read from tasks.db). It's still used by POST/PUT/DELETE/filter/page/stats/reset
-# for now - those will be migrated to SQL in later stages.
+# NOTE: this old in-memory list is no longer used by GET /tasks, GET /tasks/{id},
+# or POST /tasks (those now read/write tasks.db). Still used by
+# PUT/DELETE/filter/page/stats/reset for now - those migrate to SQL in later stages.
 tasks = [
     {"id": 1, "title": "Learn FastAPI", "done": False},
     {"id": 2, "title": "Build Task API", "done": False},
@@ -142,20 +142,17 @@ def create_task(new_task: dict):
             detail="title is required and cannot be empty"
         )
 
-    next_id = max(
-        (task["id"] for task in tasks),
-        default=0
-    ) + 1
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        (title, 0)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
 
-    task = {
-        "id": next_id,
-        "title": title,
-        "done": False
-    }
-
-    tasks.append(task)
-
-    return task
+    return {"id": new_id, "title": title, "done": False}
 
 
 @app.put("/tasks/{task_id}")
