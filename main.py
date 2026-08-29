@@ -52,9 +52,9 @@ def init_db():
 init_db()
 
 
-# NOTE: this old in-memory list is no longer used by GET /tasks, GET /tasks/{id},
-# or POST /tasks (those now read/write tasks.db). Still used by
-# PUT/DELETE/filter/page/stats/reset for now - those migrate to SQL in later stages.
+# NOTE: this old in-memory list is no longer used by GET/POST/PUT/DELETE on /tasks
+# (all of those now read/write tasks.db). Still used by filter/page/stats/reset
+# for now - those migrate to SQL in a later stage if desired.
 tasks = [
     {"id": 1, "title": "Learn FastAPI", "done": False},
     {"id": 2, "title": "Build Task API", "done": False},
@@ -173,29 +173,34 @@ def update_task(task_id: int, updated_task: dict):
             detail="done must be true or false"
         )
 
-    for task in tasks:
-        if task["id"] == task_id:
-            task["title"] = title
-            task["done"] = done
-            return task
-
-    raise HTTPException(
-        status_code=404,
-        detail=f"Task {task_id} not found"
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
+        (title, int(done), task_id)
     )
+    conn.commit()
+
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    conn.close()
+    return {"id": task_id, "title": title, "done": done}
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
-            tasks.pop(index)
-            return
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    rows_deleted = cursor.rowcount
+    conn.close()
 
-    raise HTTPException(
-        status_code=404,
-        detail=f"Task {task_id} not found"
-    )
+    if rows_deleted == 0:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return
 
 
 @app.get("/stats")
