@@ -1,60 +1,21 @@
-import sqlite3
 from fastapi import FastAPI, HTTPException
+from task_repository import (
+    init_db,
+    get_all_tasks,
+    get_task_by_id,
+    insert_task,
+    update_task_row,
+    delete_task_row,
+)
 
 app = FastAPI()
-
-# DATABASE CONFIGURATION - A2 STAGE 0
-
-DB_FILE = "tasks.db"
-
-def get_connection():
-    return sqlite3.connect(DB_FILE)
-
-
-def init_db():
-    # Connect to database
-    # If tasks.db does not exist, SQLite creates it automatically
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Create tasks table if it does not already exist
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            done BOOLEAN NOT NULL DEFAULT 0
-        )
-    """)
-
-    # Check how many tasks already exist
-    cursor.execute("SELECT COUNT(*) FROM tasks")
-    count = cursor.fetchone()[0]
-
-    # Add seed tasks ONLY if database is empty
-    if count == 0:
-        cursor.executemany(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)",
-            [
-                ("Learn FastAPI", 0),
-                ("Build Task API", 0),
-                ("Push to GitHub", 0),
-            ]
-        )
-
-    # Save changes
-    conn.commit()
-
-    # Close database connection
-    conn.close()
-
 
 # Run database setup when application starts
 init_db()
 
 
-# NOTE: this old in-memory list is no longer used by GET/POST/PUT/DELETE on /tasks
-# (all of those now read/write tasks.db). Still used by filter/page/stats/reset
-# for now - those migrate to SQL in a later stage if desired.
+# NOTE: this old in-memory list is only used by filter/page/stats/reset for now.
+# All real CRUD (GET/POST/PUT/DELETE on /tasks) goes through task_repository.py.
 tasks = [
     {"id": 1, "title": "Learn FastAPI", "done": False},
     {"id": 2, "title": "Build Task API", "done": False},
@@ -78,20 +39,7 @@ def health_check():
 
 @app.get("/tasks")
 def get_tasks():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, done FROM tasks")
-    rows = cursor.fetchall()
-    conn.close()
-
-    result = []
-    for row in rows:
-        result.append({
-            "id": row[0],
-            "title": row[1],
-            "done": bool(row[2])
-        })
-    return result
+    return get_all_tasks()
 
 
 # NOTE: these two must come BEFORE /tasks/{task_id},
@@ -120,16 +68,10 @@ def paginate_tasks(limit: int = 10, offset: int = 0):
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if row is None:
+    task = get_task_by_id(task_id)
+    if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-
-    return {"id": row[0], "title": row[1], "done": bool(row[2])}
+    return task
 
 
 @app.post("/tasks", status_code=201)
@@ -142,17 +84,7 @@ def create_task(new_task: dict):
             detail="title is required and cannot be empty"
         )
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
-        (title, 0)
-    )
-    conn.commit()
-    new_id = cursor.lastrowid
-    conn.close()
-
-    return {"id": new_id, "title": title, "done": False}
+    return insert_task(title)
 
 
 @app.put("/tasks/{task_id}")
@@ -173,32 +105,19 @@ def update_task(task_id: int, updated_task: dict):
             detail="done must be true or false"
         )
 
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-        (title, int(done), task_id)
-    )
-    conn.commit()
+    result = update_task_row(task_id, title, done)
 
-    if cursor.rowcount == 0:
-        conn.close()
+    if result is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    conn.close()
-    return {"id": task_id, "title": title, "done": done}
+    return result
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    conn.commit()
-    rows_deleted = cursor.rowcount
-    conn.close()
+    deleted = delete_task_row(task_id)
 
-    if rows_deleted == 0:
+    if not deleted:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     return
 
