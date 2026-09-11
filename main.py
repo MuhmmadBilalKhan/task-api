@@ -1,3 +1,4 @@
+from supabase_client import supabase
 from fastapi import FastAPI, HTTPException
 from task_repository import (
     init_db,
