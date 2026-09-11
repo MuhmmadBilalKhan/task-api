@@ -1,35 +1,67 @@
 # Task API
 
-A simple CRUD (Create, Read, Update, Delete) REST API for managing a to-do task list, built with Python and FastAPI. Tasks are stored in a SQLite database and survive server restarts.
+A simple CRUD (Create, Read, Update, Delete) REST API for managing a to-do task list, built with Python and FastAPI. Tasks are stored in PostgreSQL, running in a Docker container, and survive both app restarts and full stack restarts.
 
 ## Technologies
 
 - Python 3.12
 - FastAPI
 - Uvicorn
-- SQLite (via Python's built-in `sqlite3` module)
+- PostgreSQL 16 (via Docker)
+- psycopg (Postgres driver)
+- Docker & Docker Compose
 
-## How to Install
+## How to Run (recommended - one command)
 
-Clone the repository and install dependencies:
+This project uses Docker Compose to start the API and its database together.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+2. Clone the repository:
 
 ```
 git clone https://github.com/MuhmmadBilalKhan/task-api.git
 cd task-api
+```
+
+3. Copy the example environment file:
+
+```
+copy .env.example .env
+```
+
+4. Start everything with one command:
+
+```
+docker compose up
+```
+
+This builds the API image, starts a PostgreSQL 16 container with a persistent volume, waits for the database to be healthy, then starts the API. On first run it automatically creates the `tasks` table and seeds 3 example tasks.
+
+The API is then available at http://localhost:8000
+
+To stop everything:
+
+```
+docker compose down
+```
+
+Your data survives this - `docker compose down` followed by `docker compose up` again will show the same tasks, because the database's data lives in a named Docker volume (`taskdata`), not inside the container itself.
+
+## Alternative: run locally without Docker
+
+If you'd rather run the API directly on your machine against a database you manage yourself:
+
+```
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## How to Run
+Set `DATABASE_URL` in a `.env` file (see `.env.example`) pointing at any reachable PostgreSQL instance, then:
 
 ```
 uvicorn main:app --reload
 ```
-
-The server will start at http://localhost:8000
-
-On first run, this automatically creates a `tasks.db` file with a `tasks` table and seeds 3 example tasks. Restarting the server does not duplicate the seed data or create a second database.
 
 ## API Endpoints
 
@@ -80,39 +112,41 @@ This lets you test every endpoint directly from the browser.
 
 ![Swagger UI](swagger-screenshot.png)
 
-## Database (SQLite)
+## Architecture: the Repository Pattern
 
-### Why SQLite
+All database code lives in a single file, `task_repository.py`. Routes in `main.py` never contain SQL directly - they call repository functions like `get_all_tasks()`, `insert_task(title)`, and `update_task_row(task_id, title, done)`, which return plain Python data (dicts, `None`, or booleans), never raw database rows or driver-specific objects.
 
-SQLite was chosen because it needs no separate database server, no installation, and no configuration - the entire database is a single file (`tasks.db`) that Python's built-in `sqlite3` module can create and use directly. This makes it ideal for a small project like this one, where the goal is to learn persistence without adding infrastructure overhead. For a larger, multi-user production system, a server-based database like PostgreSQL would be a more appropriate next step.
+This is why moving from SQLite (Assignment 2) to PostgreSQL (this assignment) required editing only `task_repository.py` - the connection setup, the SQL placeholder syntax (`?` became `%s`), and how the newly-created row's id was retrieved (`cursor.lastrowid` became `RETURNING id`). Every route in `main.py`, every status code, and every validation rule stayed completely unchanged.
 
-### Where the database lives
+## Database: PostgreSQL in Docker
 
-The database is stored in `tasks.db`, in the root of the project folder. It is created automatically the first time the server starts - if the file or the `tasks` table doesn't exist yet, the app creates both, then seeds 3 example tasks only if the table is empty. `tasks.db` is listed in `.gitignore` and is not committed to the repository, so every fresh clone starts with a clean, freshly-seeded database rather than inheriting someone else's data.
+### Why Docker + PostgreSQL
+
+PostgreSQL is a real database server - the same kind of engine used by most production backends - rather than a single file like SQLite. Running it in a Docker container means no manual installation, no version conflicts with other projects, and a setup that behaves identically on any machine. A named volume (`taskdata`) keeps the data on disk outside the container, so removing or rebuilding the container never loses data.
+
+### Configuration
+
+The database connection string lives in `.env` (git-ignored, never committed) as `DATABASE_URL`. A committed `.env.example` shows the same keys with the same local-development values, since this project uses a throwaway development password (`dev`) rather than a real secret.
 
 ### Schema
 
-The `tasks` table has three columns:
+| Column | Type    | Notes                                    |
+|--------|---------|-------------------------------------------|
+| id     | SERIAL  | Primary key, auto-incremented by Postgres |
+| title  | TEXT    | Required, cannot be empty                 |
+| done   | BOOLEAN | Defaults to false                         |
 
-| Column | Type    | Notes                          |
-|--------|---------|----------------------------------|
-| id     | INTEGER | Primary key, auto-incremented by SQLite |
-| title  | TEXT    | Required, cannot be empty       |
-| done   | BOOLEAN | Stored as 0/1, defaults to 0     |
+### Proving persistence
 
-### Exploring the database by hand
+I created a task, then ran `docker compose down` (destroying both containers) followed by `docker compose up` (recreating them from scratch). The task was still present in `GET /tasks` afterward, proving the named volume - not the containers themselves - is what keeps the data alive.
 
-I opened `tasks.db` in [DB Browser for SQLite](https://sqlitebrowser.org/) and ran several queries directly against it, including:
+I also verified the database directly using `psql` inside the container:
 
-```sql
-SELECT * FROM tasks WHERE done = 1;
+```
+docker exec -it taskdb psql -U postgres -d tasks -c "SELECT * FROM tasks;"
 ```
 
-This returned 0 rows on a freshly seeded database, since none of the 3 example tasks are marked done by default.
-
-![DB Browser](db-browser-screenshot.png)
-
-I also ran `UPDATE tasks SET done = 1;` directly in DB Browser (with no server restart), then called `GET /tasks` through the API and saw every task immediately show `"done": true` - confirming the API and DB Browser read and write the exact same file, with no syncing step involved.
+![Database in psql](db-screenshot.png)
 
 ## Extras (Optional)
 
@@ -126,22 +160,11 @@ These endpoints go beyond the core CRUD requirement:
 | POST   | /reset                             | Restore the 3 example tasks                |
 | GET    | /tasks/page?limit=2&offset=1       | Return a paginated slice of tasks          |
 
-Example:
-
-```
-curl -i http://localhost:8000/stats
-```
-
-```
-HTTP/1.1 200 OK
-{"total":3,"done":0,"open":3}
-```
-
-Note: these extras still use the original in-memory list from Assignment 1 and have not yet been migrated to SQL.
+Note: these extras still use the original in-memory list from Assignment 1 and have not yet been migrated to the database.
 
 ## The Mortality Experiment (Assignment 1)
 
-In Assignment 1, I created a new task with POST, confirmed it existed with GET /tasks, then restarted the server. The new task was gone - only the original 3 seed tasks remained, because the task list was a plain Python variable held in the server's memory, not saved to disk. This assignment (A2) fixes that limitation by moving storage to SQLite, where data now survives a restart.
+In Assignment 1, tasks were stored in a plain Python list, which reset every time the server restarted. This was intentional, to demonstrate the limitation of in-memory storage before introducing real persistence in later assignments.
 
 ## AI vs Me (Stage 7 - AI Rematch, Assignment 1)
 
